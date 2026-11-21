@@ -86,17 +86,14 @@ def main():
     ap.add_argument("--out", default="out")
     ap.add_argument("--font")
     ap.add_argument("--preview", action="store_true",
-                    help="권리 미확인이어도 '게시 불가' 워터마크 붙인 내부 검토/허락 요청용 시안 생성")
+                    help="'PREVIEW' 워터마크 붙인 검토용 시안")
     a = ap.parse_args()
     plan = json.loads(pathlib.Path(a.plan).read_text(encoding="utf-8"))
     srcs = list(dict.fromkeys(c["source"] for c in plan["clips"]))
-    bad = {k: v for k, v in rights.check(a.work, srcs).items() if v}
-    if bad and not a.preview:
-        msg = "\n".join(f"  {k}: " + "; ".join(v) for k, v in bad.items())
-        sys.exit(f"⛔ 권리 확인 안 된 소스가 있어 렌더 중단 ({rights.path(a.work)}):\n{msg}\n"
-                 "  → 허락 받은 뒤 rights.json 갱신, 또는 --preview 로 시안만 생성")
-    preview = bool(bad) or a.preview
-    reg = rights.load(a.work)
+    reg, warns = rights.report(a.work, srcs, plan)
+    if warns:
+        print("── 리스크 경고 (렌더는 계속 진행) ──\n" + "\n".join(warns))
+    preview = a.preview
     credits = [reg[s]["credit"] for s in srcs if reg.get(s, {}).get("credit")]
     root, outd = pathlib.Path(a.work), pathlib.Path(a.out); outd.mkdir(parents=True, exist_ok=True)
     font = pick_font(a.font or plan.get("font"))
@@ -129,7 +126,7 @@ def main():
     if preview:
         out = out.with_name(out.stem + "_PREVIEW" + out.suffix)
         wm = tmp / "wm.ass"
-        wm.write_text(build_ass("", [(0, offset, "PREVIEW · 게시 불가")], offset, font,
+        wm.write_text(build_ass("", [(0, offset, "PREVIEW")], offset, font,
                                 {**st, "sub_size": 90, "sub_y": 900}).replace("&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000", "&H60FFFFFF,&H60FFFFFF,&H600000FF,&H96000000"),
                       encoding="utf-8")
         vf += f",ass={wm}"
@@ -142,8 +139,10 @@ def main():
         if c not in cap: cap = (cap + "\n\n" + c).strip()
     if cap:
         out.with_suffix(".txt").write_text(cap, encoding="utf-8")
+    if warns:
+        out.with_suffix(".risk.txt").write_text("\n".join(warns), encoding="utf-8")
     shutil.rmtree(tmp)
-    print(f"[ok] {out}  ({offset:.1f}s, font={font}{', PREVIEW - 게시 불가' if preview else ''})")
+    print(f"[ok] {out}  ({offset:.1f}s, font={font}{', PREVIEW' if preview else ''}{f', 경고 {len(warns)}건' if warns else ''})")
 
 if __name__ == "__main__":
     main()

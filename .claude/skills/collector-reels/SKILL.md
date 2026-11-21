@@ -21,21 +21,18 @@ pip install yt-dlp faster-whisper
 python $S/fetch.py <URL1> <URL2> ... --work reels/work
 ```
 
-## 1-1. 권리 확인 (필수 · 렌더 차단 게이트)
+## 1-1. 출처 & 리스크 경고 (렌더를 막지 않음)
 ```bash
-python $S/rights.py init  --work reels/work   # reels/rights.json 생성/갱신 (유튜브 CC BY 영상은 자동 표시)
-python $S/rights.py check --work reels/work   # ⛔ 항목이 있으면 render.py가 최종본을 만들지 않음
+python $S/rights.py check reels/plans/reel_01.json --work reels/work   # render.py 실행 시에도 자동 출력
 ```
-소스마다 `reels/rights.json`에 다음을 채운다 (Claude는 사용자 확인 없이 승인값을 임의로 채우지 않는다):
-- `basis`: `permission`(원작자 허락) / `cc-by`(유튜브 CC BY 표시) / `own`(직접 촬영·본인 채널). 그 외는 렌더 불가
-- `evidence`: 허락 메일·DM 캡처 경로나 날짜 / `scope`, `expires`: 허락 범위·기한(만료 시 차단)
-- `credit`: 캡션에 자동으로 붙는 출처 문구
-- `portrait_ok`: 출연 컬렉터 초상 사용 동의 확인 / `music_ok`: 영상 속 배경음악 문제 없음(제거·권리 확인)
-
-미확인 소스는:
-1. `permission_request.md` 템플릿으로 원작 채널에 허락 요청 메일/DM 초안을 작성해 사용자에게 준다.
-2. 허락 요청에 첨부하거나 내부 검토용으로 `render.py --preview`로 시안을 만든다. 시안에는 `PREVIEW · 게시 불가` 워터마크가 붙고 파일명에 `_PREVIEW`가 들어간다.
-- 오래된 영상이어도, 출처를 표기해도 허락을 대신하지 않는다. 해외 영상도 똑같이 보호받는다. 권리 확인을 피하는 방법은 안내하지 않는다.
+- 소스별 출처 문구를 `reels/rights.json`에 자동 생성하고, 렌더 시 캡션(`.txt`)에 자동 삽입한다. 문구는 직접 수정 가능.
+- 경고(⚠/🔴/ℹ)는 출력 + `reel_XX.risk.txt`로 저장만 하고 렌더는 계속한다:
+  - ⚠ 허락/CC BY 없는 소스 (출처 표기만으로는 면책되지 않음)
+  - 🔴 방송사·대형 채널 소스 (자동 저작권 탐지·신고 가능성 높음)
+  - 🔴 음악/음원 정보 감지
+  - ⚠ 한 소스에서 30초 초과 또는 원본의 10% 초과 사용
+  - ℹ 내 해설 없이 원본 발췌 위주 (plan에 `"commentary": true`면 생략)
+- 🔴 경고가 뜬 릴스는 보고할 때 맨 위에 표시하고, 대체 소스나 클립 단축을 제안한다.
 
 ## 2. 분석
 ```bash
@@ -71,17 +68,18 @@ python $S/analyze.py --work reels/work          # --model medium 으로 전사 �
 ```
    - `subtitles` 시간은 **원본 영상 기준 초**. 생략 시 전사 자동 사용.
    - `layout`: `blur`(가로 영상 전체 + 흐린 배경, 기본) / `crop`(중앙 크롭, 인물 클로즈업에 적합). 클립별 지정 가능.
+   - 내 해설 자막(평가·맥락 설명)을 넣었으면 `"commentary": true`
    - 선택: `"style": {"title_size": 78, "title_y": 230, "sub_size": 64, "sub_y": 380, "wrap": 16}`, `"font": "Pretendard"`
 
 ## 4. 렌더
 ```bash
-python $S/render.py reels/plans/reel_01.json --work reels/work --out reels/out            # 권리 확인 통과 시에만
-python $S/render.py reels/plans/reel_01.json --work reels/work --out reels/out --preview  # 워터마크 시안
+python $S/render.py reels/plans/reel_01.json --work reels/work --out reels/out
+python $S/render.py reels/plans/reel_01.json --work reels/work --out reels/out --preview  # PREVIEW 워터마크 시안
 ```
-결과: `reels/out/reel_01.mp4` (1080x1920, 30fps), `.ass`(자막 원본, 수정 후 재번인 가능), `.txt`(캡션 + `credit` 출처 자동 포함).
+결과: `reels/out/reel_01.mp4` (1080x1920, 30fps), `.ass`(자막 원본, 수정 후 재번인 가능), `.txt`(캡션 + 출처 자동 포함), `.risk.txt`(경고 내역).
 
 ## 5. 검수
 렌더 후 `ffmpeg -ss <t> -i out.mp4 -frames:v 1 check.jpg`로 2~3컷 뽑아 제목/자막 위치·잘림을 확인하고, 문제 있으면 plan 수정 후 재렌더.
 
 ## 주의
-- 기본 요청 시 소스 영상 수만큼 릴스를 만들고, 각 릴스의 제목·선정 이유·권리 상태(✅/⛔)를 표로 요약해 보고한다.
+- 기본 요청 시 소스 영상 수만큼 릴스를 만들고, 각 릴스의 제목·선정 이유·리스크 경고(🔴/⚠ 개수)를 표로 요약해 보고한다.
