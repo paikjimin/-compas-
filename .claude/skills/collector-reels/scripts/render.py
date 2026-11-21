@@ -13,7 +13,9 @@ plan.json:
 }
 subtitles 시간은 원본 기준(초). 생략하면 transcript.json에서 해당 구간을 자동 사용.
 """
-import argparse, json, pathlib, subprocess, tempfile, shutil
+import argparse, json, pathlib, subprocess, sys, tempfile, shutil
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+import rights
 
 W, H = 1080, 1920
 FONTS = ["Pretendard", "Noto Sans CJK KR", "NanumSquare", "NanumGothic", "Apple SD Gothic Neo", "Malgun Gothic"]
@@ -83,8 +85,19 @@ def main():
     ap.add_argument("--work", default="work")
     ap.add_argument("--out", default="out")
     ap.add_argument("--font")
+    ap.add_argument("--preview", action="store_true",
+                    help="권리 미확인이어도 '게시 불가' 워터마크 붙인 내부 검토/허락 요청용 시안 생성")
     a = ap.parse_args()
     plan = json.loads(pathlib.Path(a.plan).read_text(encoding="utf-8"))
+    srcs = list(dict.fromkeys(c["source"] for c in plan["clips"]))
+    bad = {k: v for k, v in rights.check(a.work, srcs).items() if v}
+    if bad and not a.preview:
+        msg = "\n".join(f"  {k}: " + "; ".join(v) for k, v in bad.items())
+        sys.exit(f"⛔ 권리 확인 안 된 소스가 있어 렌더 중단 ({rights.path(a.work)}):\n{msg}\n"
+                 "  → 허락 받은 뒤 rights.json 갱신, 또는 --preview 로 시안만 생성")
+    preview = bool(bad) or a.preview
+    reg = rights.load(a.work)
+    credits = [reg[s]["credit"] for s in srcs if reg.get(s, {}).get("credit")]
     root, outd = pathlib.Path(a.work), pathlib.Path(a.out); outd.mkdir(parents=True, exist_ok=True)
     font = pick_font(a.font or plan.get("font"))
     st = {"title_size": 78, "title_y": 230, "sub_size": 64, "sub_y": 380, "wrap": 16, **plan.get("style", {})}
@@ -112,14 +125,25 @@ def main():
     ass = tmp / "subs.ass"
     ass.write_text(build_ass(plan.get("title", ""), events, offset, font, st), encoding="utf-8")
     out = outd / plan.get("output", "reel.mp4")
+    vf = f"ass={ass}"
+    if preview:
+        out = out.with_name(out.stem + "_PREVIEW" + out.suffix)
+        wm = tmp / "wm.ass"
+        wm.write_text(build_ass("", [(0, offset, "PREVIEW · 게시 불가")], offset, font,
+                                {**st, "sub_size": 90, "sub_y": 900}).replace("&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000", "&H60FFFFFF,&H60FFFFFF,&H600000FF,&H96000000"),
+                      encoding="utf-8")
+        vf += f",ass={wm}"
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst),
-                    "-vf", f"ass={ass}", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+                    "-vf", vf, "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
                     "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(out)], check=True)
     shutil.copy(ass, out.with_suffix(".ass"))
-    if plan.get("caption"):
-        out.with_suffix(".txt").write_text(plan["caption"], encoding="utf-8")
+    cap = plan.get("caption", "")
+    for c in credits:
+        if c not in cap: cap = (cap + "\n\n" + c).strip()
+    if cap:
+        out.with_suffix(".txt").write_text(cap, encoding="utf-8")
     shutil.rmtree(tmp)
-    print(f"[ok] {out}  ({offset:.1f}s, font={font})")
+    print(f"[ok] {out}  ({offset:.1f}s, font={font}{', PREVIEW - 게시 불가' if preview else ''})")
 
 if __name__ == "__main__":
     main()
